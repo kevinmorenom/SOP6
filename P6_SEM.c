@@ -13,6 +13,7 @@
 #include <math.h>
 #include <sys/time.h>
 #include "semaphores.h"
+#include "listas.h"
 
 
 #define VELPROD 1000000	// Microsegundos
@@ -21,6 +22,7 @@
 #define INICIAL 900000000
 #define FINAL 1000000000
 #define NPROC 4
+
 int SIZE=0;
 int start,end;
 int PrimeCounter[NPROC];
@@ -29,6 +31,7 @@ enum {EXMUT,BARRERA};
 int barrera;
 SEM_ID semarr;
 enum {E_MAX,N_BLOK,S_EXMUT};  // Semáforos 0,1 y 2
+
 
 int isprime(int n)
 {
@@ -122,7 +125,7 @@ void *productor(void *args,double shm_id)
 			{buffer[5]++;}
 			else
 			{buffer[5]=0;}
-			// printf("Productor %d produce %d\n",nthread,n);
+			printf("Productor %d produce %d\n",nthread,n);
         	// printf("Buffer: %f %f %f %f %f %f %f \n",buffer[0],buffer[1],buffer[2],buffer[3],buffer[4],buffer[5],buffer[6]);
 
         	usleep(1000000);
@@ -148,13 +151,15 @@ void *productor(void *args,double shm_id)
 
 void *consumidor(void *arg,double shm_id)
 {
-    int n,next2read,consume;
+	ptrLista lista = NULL;
+	ptrNodo nodo = NULL;
+    int n,next2read;
+	int consume=0;
 	double* buffer = (double*)shmat(shm_id,0,0); // apunta al inicio de la memoria
 	if(buffer == (double*) -1){
 		printf("shmat error\n");
 	    exit(1);
 	}
-    printf("Inicia Consumidor\n");
 	semwait(semarr,N_BLOK);	// Si el buffer está vacío, se bloquea
     semwait(semarr,S_EXMUT);	// Asegura el buffer como sección crítica
 	int temp=buffer[6];
@@ -167,6 +172,7 @@ void *consumidor(void *arg,double shm_id)
 		//  {
 			if(next2read!=0){
         	printf("Consumidor consume %d\n",next2read);
+			insertar_orden(next2read,&lista,nodo);
 			consume++;
 			next2read=0;
 			if(buffer[6]!=4)
@@ -183,7 +189,7 @@ void *consumidor(void *arg,double shm_id)
 			}
 		//  }
         // usleep(rand()%VELCONS);
-		printf("2read: %d\n",next2read);
+		// printf("2read: %d\n",next2read);
         semsignal(semarr,S_EXMUT);	// Libera la SC el buffer
         semsignal(semarr,E_MAX);	// Si el productor está bloqueado porque el buffer estaba lleno, lo desbloquea
         usleep(1000000);
@@ -192,7 +198,12 @@ void *consumidor(void *arg,double shm_id)
 
     }
     semsignal(semarr,E_MAX);	// Si el productor está bloqueado porque el buffer estaba lleno, lo desbloquea
-	printf("%d primos\n",consume);
+	printf("---------------------------\n");
+	printf("Se encontraron %d primos\n",consume);
+	printf("---------------------------\n");
+	printf("Los números primos son:\n");
+
+	nodos_lista(lista);
 	exit(0);
 }
 
@@ -251,7 +262,7 @@ int main(int argc,char *argv[]){
 		ret=wait(NULL); // esperar a todos los procesos
 	}
 
-    printf("Final Buffer: %f %f %f %f %f %f %f\n",addr[0],addr[1],addr[2],addr[3],addr[4],addr[5],addr[6]);
+    // printf("Final Buffer: %f %f %f %f %f %f %f\n",addr[0],addr[1],addr[2],addr[3],addr[4],addr[5],addr[6]);
 
 	erasesem(barrera);
 	erasesem(semarr);
