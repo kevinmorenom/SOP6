@@ -16,20 +16,14 @@
 #include "listas.h"
 
 
-#define VELPROD 1000000	// Microsegundos
-#define VELCONS 5000000
-#define TAMBUFFER 7
-#define INICIAL 900000000
-#define FINAL 1000000000
-#define NPROC 4
+#define TAMBUFFER 7 //5 espacios para primos, 1 referencia de lectura, 1 referencia de escritura
+#define NPROC 4 //numero de procesos
 
-int SIZE=0;
-int start,end;
-int PrimeCounter[NPROC];
-int isprime(int n);
-enum {EXMUT,BARRERA};
-int barrera;
-SEM_ID semarr;
+int SIZE=0;//cantidad de números en el rango
+int start,end;//limites del rango
+enum {EXMUT,BARRERA};//enumeración
+int barrera;//arreglo de semaforos
+SEM_ID semarr;//arreglo de semaforos
 enum {E_MAX,N_BLOK,S_EXMUT};  // Semáforos 0,1 y 2
 
 
@@ -59,12 +53,12 @@ int isprime(int n)
 	return(prime);
 }
 
-void sembarrier(int semid)
+void sembarrier(int semid)//barrera de semaforos
 {
 	struct sembuf s;
 	int n;
 	
-	// semwait(semid,EXMUT);
+	// WAIT A EXMUT;
 	s.sem_num=EXMUT;
 	s.sem_op=-1;
 	s.sem_flg=0;
@@ -72,13 +66,14 @@ void sembarrier(int semid)
 	
 	n=semctl(semid,BARRERA,GETNCNT,0); //Cuántos procesos hay bloqueados en barrera?
 
+	// SIGNAL A EXMUT;
 	s.sem_num=EXMUT;
 	s.sem_op=1;
 	s.sem_flg=0;
 	semop(semid,&s,1);
 
 	
-	if(n<NPROC-1)
+	if(n<NPROC-1)//si todavía no estan todos los procesos -1 bloqueados, bloqueo el proceso
 	{
 		// WAIT
 		s.sem_num=BARRERA; // número de semáforo en el arreglo
@@ -87,12 +82,11 @@ void sembarrier(int semid)
 	
 		semop(semid,&s,1);
 	}
-	else
+	else //si solo falto yo de bloquear, desbloqueo todos
 	{
 		s.sem_num=BARRERA; // número de semáforo en el arreglo
 		s.sem_op=3;
 		s.sem_flg=0;
-
 		semop(semid,&s,1);		
 	}
 	return;
@@ -106,55 +100,55 @@ void *productor(void *args,double shm_id)
 	    exit(1);
 	}
 
-	int i,j;
-    int nthread=*((int *)args);
-    int inicio=nthread*(SIZE/NPROC)+nthread+start;
-    int fin=(nthread+1)*(SIZE/NPROC)+nthread+start;
-    if (fin>end)fin=end;
+    int nthread=*((int *)args); //Numero de proceso
+    int inicio=nthread*(SIZE/NPROC)+nthread+start;//limite inferior
+    int fin=(nthread+1)*(SIZE/NPROC)+nthread+start;//limite superior
+    if (fin>end)fin=end;//ajuste de limite superior
     int n,temp;
-    // printf("Inicia productor %d\n",nthread);
     for(n=inicio;n<=fin;n++)
     {	
-		if(isprime(n))
+		if(isprime(n))//si es primo
         {
 			semwait(semarr,E_MAX);	// Si se llena el buffer se bloquea
 			semwait(semarr,S_EXMUT);	// Asegurar el buffer como sección crítica
-			temp=buffer[5];
-			buffer[temp]=n;
-			if(buffer[5]!=4)
-			{buffer[5]++;}
+			temp=buffer[5];//referencia de escritura
+			buffer[temp]=n;//escribir en el buffer
+			if(buffer[5]!=4)//actualizar referencia de escritura (buffer redondo)
+			{
+				buffer[5]++;
+			}
 			else
-			{buffer[5]=0;}
+			{
+				buffer[5]=0;
+			}
 			printf("Productor %d produce %d\n",nthread,n);
-        	// printf("Buffer: %f %f %f %f %f %f %f \n",buffer[0],buffer[1],buffer[2],buffer[3],buffer[4],buffer[5],buffer[6]);
-
         	usleep(1000000);
-
-			// usleep(rand()%5);
-
 			semsignal(semarr,S_EXMUT);	// Libera la sección crítica del buffer
 			semsignal(semarr,N_BLOK);	// Si el consumidor está bloqueado porque el buffer está vacío, lo desbloqueas
 		}
 
     }
-	sembarrier(barrera);
+	sembarrier(barrera);//Una vez que termina el proceso entra a la barrera
+	//SECCION CRÍTICA
 	semwait(semarr,E_MAX);	// Si se llena el buffer se bloquea
 	semwait(semarr,S_EXMUT);	// Asegurar el buffer como sección crítica
-	temp=buffer[5];
-	buffer[temp]=-1;
+		temp=buffer[5];
+		buffer[temp]=-1;//escribe terminador en buffer
 	semsignal(semarr,S_EXMUT);	// Libera la sección crítica del buffer
 	semsignal(semarr,N_BLOK);	// Si el consumidor está bloqueado porque el buffer está vacío, lo desbloqueas
-    exit(0);
+	//FIN SECCION CRÍTICA
+    
+	exit(0);
 
 }
 
 
 void *consumidor(void *arg,double shm_id)
 {
-	ptrLista lista = NULL;
-	ptrNodo nodo = NULL;
-    int n,next2read;
-	int consume=0;
+	ptrLista lista = NULL; //apuntador a lista
+	ptrNodo nodo = NULL; //apuntador a nodo
+    int n,next2read; //referencia de lectura
+	int consume=0;//contador deconsumo
 	double* buffer = (double*)shmat(shm_id,0,0); // apunta al inicio de la memoria
 	if(buffer == (double*) -1){
 		printf("shmat error\n");
@@ -162,20 +156,16 @@ void *consumidor(void *arg,double shm_id)
 	}
 	semwait(semarr,N_BLOK);	// Si el buffer está vacío, se bloquea
     semwait(semarr,S_EXMUT);	// Asegura el buffer como sección crítica
-	int temp=buffer[6];
-	next2read=buffer[temp];	
-    while(next2read!=-1)
+	int temp=buffer[6];//referencia de lectura
+	next2read=buffer[temp];	//dato leído
+    while(next2read!=-1)///si el dato no es el terminador, consumimos
     {
-        // printf("Buffer: %f %f %f %f %f %f %f \n",buffer[0],buffer[1],buffer[2],buffer[3],buffer[4],buffer[5],buffer[6]);
-		
-		//  for(n=0;n<buffer[5];n++)
-		//  {
-			if(next2read!=0){
-        	printf("Consumidor consume %d\n",next2read);
-			insertar_orden(next2read,&lista,nodo);
-			consume++;
+			if(next2read!=0){ //aseguramos que no consumamos 0
+        	printf("\t\t\t\tConsumidor consume %d\n",next2read);
+			insertar_orden(next2read,&lista,nodo);//insertamos en orden en la lista enlazada
+			consume++; //aumentamos contador
 			next2read=0;
-			if(buffer[6]!=4)
+			if(buffer[6]!=4) //actualizamos referencia de lectura (buffer redondo)
 			{
 				buffer[6]++;
 			}
@@ -184,17 +174,12 @@ void *consumidor(void *arg,double shm_id)
 				buffer[6]=0;
 			}
 			temp=buffer[6];
-			next2read=buffer[temp];
+			next2read=buffer[temp];//siguiente dato a leer
 
 			}
-		//  }
-        // usleep(rand()%VELCONS);
-		// printf("2read: %d\n",next2read);
         semsignal(semarr,S_EXMUT);	// Libera la SC el buffer
         semsignal(semarr,E_MAX);	// Si el productor está bloqueado porque el buffer estaba lleno, lo desbloquea
         usleep(1000000);
-
-        // usleep(rand()%VELCONS);
 
     }
     semsignal(semarr,E_MAX);	// Si el productor está bloqueado porque el buffer estaba lleno, lo desbloquea
@@ -203,7 +188,7 @@ void *consumidor(void *arg,double shm_id)
 	printf("---------------------------\n");
 	printf("Los números primos son:\n");
 
-	nodos_lista(lista);
+	nodos_lista(lista);//Mostramos la lista de números primos encontrados
 	exit(0);
 }
 
@@ -219,9 +204,9 @@ int main(int argc,char *argv[]){
     gettimeofday(&ts, NULL);
     start_ts = ts.tv_sec; //Tiempo inicial
 
-	 start=atoi(argv[1]);
-     end=atoi(argv[2]);
-     SIZE=(end-start);
+	 start=atoi(argv[1]); //limite inferior de rango
+     end=atoi(argv[2]); //limite superior de rango
+     SIZE=(end-start);// cantidad de numeros en el rango
 
 	int params[NPROC];
 	int p,ret;
@@ -232,17 +217,18 @@ int main(int argc,char *argv[]){
 	     exit(1);
 	}
 
-	barrera=createsemarray(0x1234,2);
+	barrera=createsemarray(0x1234,2);//inicializacion de semáforos
 	initsem(barrera,EXMUT,1);
 	initsem(barrera,BARRERA,0);
 
-	semarr=createsemarray((key_t) 9234,3);
-    initsem(semarr,E_MAX,5);
+	semarr=createsemarray((key_t) 9234,3);//inicialización de semáforos
+    initsem(semarr,E_MAX,5); //valor inicial 5
     initsem(semarr,N_BLOK,0);
     initsem(semarr,S_EXMUT,1);
 
 	//apuntador a double, apunta al espacio en memoria
 	double* addr = (double*)shmat(shm_id,0,0); 
+	//Creación de procesos productores
 	for(int i=0;i<4;i++)
 	{
 		params[i]=i;
@@ -251,7 +237,7 @@ int main(int argc,char *argv[]){
 			productor(&params[i],shm_id); // mandar a llamar la funcion en cada proceso hijo
 		}
 	}
-
+	//creación de proceso consumidor
 	int cons=fork();
 	if(cons==0){
 		consumidor(&params[0],shm_id);
@@ -259,13 +245,16 @@ int main(int argc,char *argv[]){
 	
 	for(int i=0;i<5;i++)
 	{
-		ret=wait(NULL); // esperar a todos los procesos
+		ret=wait(NULL); // esperar a todos los procesos (4 productores, 1 consumidor)
 	}
 
-    // printf("Final Buffer: %f %f %f %f %f %f %f\n",addr[0],addr[1],addr[2],addr[3],addr[4],addr[5],addr[6]);
-
+	//Eliminación de semáforos
 	erasesem(barrera);
 	erasesem(semarr);
+
+	erasesem(E_MAX);
+	erasesem(N_BLOK);
+	erasesem(S_EXMUT);
 	
     gettimeofday(&ts, NULL);
     stop_ts = ts.tv_sec; //Tiempo final
